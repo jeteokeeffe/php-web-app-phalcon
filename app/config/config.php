@@ -12,7 +12,10 @@ $settings = array(
 		'password' => 'test',
 		'name' => 'api',
 		'port' => 3306
-	),
+    ),
+    'app' => array(
+        'debug' => FALSE
+    )
 );
 
 
