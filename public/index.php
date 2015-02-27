@@ -2,10 +2,6 @@
 
 /**
  * Driver for PHP Web Application
- *
- * @package None
- * @author Jete O'Keeffe
- * @license none
  */
 
 // Setup configuration files
@@ -24,19 +20,14 @@ $config = $configPath . 'config.php';
 $autoLoad = $configPath . 'autoload.php';
 $routes = $configPath . 'routes.php';
 
-// Capture runtime errors
-register_shutdown_function(['Utilities\Debug\PhpError','runtimeShutdown']);
 
 try {
 
 	$app = new Application\Web();
 
-	// Record any php warnings/errors
-	set_error_handler(['Utilities\Debug\PhpError','errorHandler']);
-
 	 // Setup Web App (dependency injector, configuration variables, routes)
-        $app->setAutoload($autoLoad, $appDir);
-        $app->setConfig($config);
+    $app->setAutoload($autoLoad, $appDir);
+    $app->setConfig($config);
 	$app->setRoutes($routes);
 	$app->setDebugMode(TRUE);
 	$app->setView($viewsPath, $volt = TRUE);
@@ -46,5 +37,7 @@ try {
 	$app->run();
 
 } catch(Exception $e) {
-	echo $e;
+    $app->response->setStatusCode(500, "Server Error");
+    $app->response->setContent($e->getMessage());
+    $app->response->send();
 }

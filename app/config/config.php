@@ -4,7 +4,7 @@
  * Settings to be stored in dependency injector
  */
 
-$settings = array(
+return [
 	'database' => array(
 		'adapter' => 'Mysql',
 		'host' => 'localhost',
@@ -16,7 +16,5 @@ $settings = array(
     'app' => array(
         'debug' => FALSE
     )
-);
+];
 
-
-return $settings;

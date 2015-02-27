@@ -1,7 +1,6 @@
 <?php
 
 /**
- * @author Jete O'Keeffe
  * @version 1.0
  * @link http://docs.phalconphp.com/en/latest/reference/routing.html
  * @eg.
@@ -15,7 +14,7 @@ $routes = [
 
  */
 
-$routes = [
+return [
 	'/' => [
 		'controller' => 'index',
 		'action' => 'index'
@@ -25,5 +24,3 @@ $routes = [
 		'action' => 'index'
 	]
 ];
-
-return $routes;
