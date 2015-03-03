@@ -3,21 +3,13 @@
 /**
  * Main Application for Web Application
  *
- * @package Application
  * @author Jete O'Keeffe
  * @version 1.0
- * @example
- 	$app = new Web();
-	$app->setConfig('/path/to/config.php');
-	$app->setAutoload('/path/to/autoload.php');
-	$app->setRoutes('/path/to/routes.php');
-	$app->setView();
-	$app->run();
  */
-
 namespace Application;
 
-use Interfaces\IRun as IRun;
+use \Interfaces\IRun as IRun,
+    \Cli\Command as Command;
 
 class Web extends \Phalcon\Mvc\Application implements IRun {
 
@@ -41,241 +33,240 @@ class Web extends \Phalcon\Mvc\Application implements IRun {
 		$this->_debug = FALSE;
 	}
 
-    /**
-     * Set namespaces to tranverse through in the autoloader
-     *
-     * @link http://docs.phalconphp.com/en/latest/reference/loader.html
-     * @throws Exception
-     * @param string $file          map of namespace to directories
-     */
-    public function setAutoload($file, $dir) {
-        if (!file_exists($file)) {
-                throw new \Exception('Unable to load autoloader file');
-        }
+	/**
+	 * @description turn on or off debug mode
+	 */
+	public function setDebugMode($debug) {
+		$this->_debug = $debug === TRUE ?: FALSE;
+	}
 
-        // Set dir to be used inside include file
-        $namespaces = include $file;
 
-        $loader = new \Phalcon\Loader();
-        $loader->registerNamespaces($namespaces)->register();
-    }
-
-    /**
-     * Set Dependency Injector with configuration variables
-     *
-     * @throws Exception
-     * @param string $file          full path to configuration file
-     */
     public function setConfig($file) {
         if (!file_exists($file)) {
-                throw new \Exception('Unable to load configuration file');
+            throw new \Exception('Unable to load phalcon config file');
         }
 
-        $di = new \Phalcon\DI\FactoryDefault();
-        $di->set('config', new \Phalcon\Config(include $file));
+        $di = new \Phalcon\Di\FactoryDefault();
+        $config = new \Phalcon\Config(require $file);
+        $di->set('config', $config);
 
-        $di->set('db', function() use ($di) {
-            $type = strtolower($di->get('config')->database->adapter);
-            $creds = array(
-                'host' => $di->get('config')->database->host,
-                'username' => $di->get('config')->database->username,
-                'password' => $di->get('config')->database->password,
-                'dbname' => $di->get('config')->database->name
-            );
 
-            if ($di->get('config')->app->debug) {
-
-                $di->set('profiler', function() {
-                    return new \Phalcon\Db\Profiler();
-                }, TRUE);
-
-                $event = new \Phalcon\Events\Manager();
-
-                $profiler = $di->getProfiler();
-
-                $event->attach('db', function($event, $connection) use ($profiler) {
-                    if ($event->getType() == 'beforeQuery') {
-                        $profiler->startProfile($connection->getSQLStatement());
-                    }
-
-                    if ($event->getType() == 'afterQuery') {
-                        $profiler->stopProfile();
-                    }
-                });
-            } else {
-                $event = new \Events\Database\Profile();
-            }
-
-            if ($type == 'mysql') {
-                $connection =  new \Phalcon\Db\Adapter\Pdo\Mysql($creds);
-            } else if ($type == 'postgres') {
-                $connection =  new \Phalcon\Db\Adapter\Pdo\Postgesql($creds);
-            } else if ($type == 'sqlite') {
-                $connection =  new \Phalcon\Db\Adapter\Pdo\Sqlite($creds);
-            } else {
-                throw new Exception('Bad Database Adapter');
-            }
-
-            $connection->setEventsManager($event);
-
-            return $connection;
+        $di->set('db', function() use ($config) {
+            return new \Phalcon\Db\Adapter\Pdo\Mysql(array(
+                'adapter' => $config['database']['adapter'],
+                'host' => $config['database']['host'],
+                'username' => $config['database']['username'],
+                'password' => $config['database']['password'],
+                'dbname' => $config['database']['dbname'],
+                'port' => $config['database']['port']
+            ));
         });
+
+		$di->set('elements', function() {
+			return new \Elements\Elements();
+		});
 
         $this->setDI($di);
     }
 
 
-    /**
-     * Set Routes\Handlers for the application
-     *
-     * @throws Exception
-     * @param file                  file thats array of routes to load
-     */
-	public function setRoutes($file) {
-		if (!file_exists($file)) {
-            throw new \Exception('Unable to load routes file');
+    public function setAutoload($file, $dir) {
+        if (!file_exists($file)) {
+            throw new \Exception('Unable to find autoloader file');
         }
 
-		$di = $this->getDI();
+        $namespaces = include $file;
 
-		// Load Routes
-		$routes = include $file;
+            // Tell Phalcon where to find php files
+        $loader = new \Phalcon\Loader();
+        $loader->registerNamespaces($namespaces)->register();
+    }
 
-		// Add Custom Routes
-		if (!empty($routes)) {
+
+    public function setRoutes($file) {
+            //	Load Routes
+        $routes = include($file);
+
+			//	Setup Routes
+        $di = $this->getDI();
+		$di->set('router', function() use ($routes) {
+
 			$router = new \Phalcon\Mvc\Router();
-			$router->setDefaults(['namespace' => 'Controllers']);
-			$router->removeExtraSlashes(TRUE);
-			foreach($routes as $uri => $route) {
-				$router->add($uri,
-					$route
-				);
-			}
+            $router->setDefaultNamespace('Controllers');
+
+            //	Setup Routes
+            foreach($routes as $uri => $route) {
+                $router->add($uri,
+                    $route
+                );
+            }
+
+            //$router->notFound(array('controller' => 'notfound', 'action' => 'index'));
 			$router->handle();
-		} else {
-			throw new \Exception('$routes not set properly');
-		}
-
-		$di->set('router', $router);
-		$this->setDI($di);
-	}
-
-	/**
-	 * Set View
-	 */
-	public function setView($dir, $useVolt = FALSE) {
-		$di = $this->getDI();
-
-		$view = new \Phalcon\Mvc\View();
-		$view->setViewsDir($dir);
-		if ($useVolt) {
-			$view->registerEngines(['.volt' => 'Phalcon\Mvc\View\Engine\Volt']);
-		}
-
-        if ($di->get('config')->app->debug) {
-            // Get the views for debugging display
-            $eventsManager = new \Phalcon\Events\Manager();
-            $eventsManager->attach("view", function($event, $view) {
-                if ($event->getType() == 'beforeRenderView') {
-                    $this->_views[] = $view->getActiveRenderPath();
-                }
-            });
-            $view->setEventsManager($eventsManager);
-        }
-
-		$di->set('view', $view);
-
-		$this->setDI($di);
-	}
-
-	/**
-	 * Turn on or off debug mode
-	 * 
-	 * @param bool $debug
-	 */
-	public function setDebugMode($debug) {
-		$this->_debug = $debug === TRUE ?: FALSE;
-	}
-	
-	/**
-	 * Get debug mode
-	 * 
-	 * @return bool $debug
-	 */
-	public function getDebugMode() {
-		return $this->_debug;
-	}
+			return $router;
+		});
+        $this->setDI($di);
+    }
 
 
-	/**
-	 * Initialize all special routing rules
-	 */
-	protected function registerRoutes() {
-		$di = $this->getDI();
-                
+    public function setBaseUrl($base) {
+        $di = $this->getDI();
 		$di->set('url', function() {
 			$url = new \Phalcon\Mvc\Url();
-			$url->setBaseUri('/');
+			$url->setBaseUri($base);
 			return $url;
 		});
+        $this->setDI($di);
+    }
 
-		// Set Dependancy Injector required by Phalcon MVC
+
+    public function setView($viewPath = '../app/views/') {
+
+        $di = $this->getDI();
+		$di->set('view', function() use ($viewPath) {
+
+			$view = new \Phalcon\Mvc\View();
+			$view->setViewsDir($viewPath);
+
+			if ($this->_debug) {
+					//	Track Views
+				$eventsManager = new \Phalcon\Events\Manager();
+
+				$eventsManager->attach("view", function($event, $view) {
+					if ($event->getType() == 'beforeRenderView') {
+						$this->_views[] = $view->getActiveRenderPath();
+					}
+				});
+				$view->setEventsManager($eventsManager);
+			}
+
+			return $view;
+		});
 		$this->setDI($di);
+    }
 
-	}
 
 	/**
 	 * launch/run application
 	 */
 	public function run() {
 		try {
-            $di = $this->getDI();
- 
+			$isCaptureOn = FALSE;
 
-				//	Setup Everything
-			//$this->registerRoutes();
-
-			// Execute MVC and get display
+				//	Execute MVC and get display
 			echo $this->handle()->getContent();
 			flush();
 
 				//	Display debug info for development site only
-			if ($di->get('config')->app->debug) {
+			if ($this->_debug) {
 				$this->printDebug();
 			}
+        //} catch(\Phalcon\Mvc\Dispatcher\Exception $e) {
 
-
-		} catch(\Phalcon\Mvc\Dispatcher\Exception $e) {
-			header("HTTP/1.0 404 Not Found");
-
-			$view = new \Phalcon\Mvc\View();
-			$view->setViewsDir('../app/views/');
-			$view->start();
-			$view->render("error", "404");
-			$view->finish();
-			echo $view->getContent();
+		} catch(\Exception $e) {
+            trigger_error($e->getMessage(), E_USER_ERROR);
+            //die($e);
+			//header("HTTP/1.0 404 Not Found");
 		}
 	}
-
 
 
 	/**
 	 * display debug information
 	 */
 	public function printDebug() {
+
 		$dispatcher = $this->getDI()->get('dispatcher');
 
 		$controller = $dispatcher->getControllerName();
 		$action = $dispatcher->getActionName();
 
-        $view = new \Phalcon\Mvc\View\Simple();
-        $view->setViewsDir('../app/views/');
-        // Render app/views/debug.phtml
-        echo $view->render("debug", array(
-            'controller' => $controller,
-            'action' => $action,
-            'views' => $this->_views,
-            'time' => microtime(TRUE) - $_SERVER['REQUEST_TIME'],
-        ));
+		//$main = $this->getDI()->get('view')->getMainView();
+		//$ = $view->getLayout(); $view->getMainView();
+		$now = microtime(TRUE);
+		
+		$time = $now - $_SERVER['REQUEST_TIME'];
+
+		echo "<style>
+		.debug-table td, .debug-table th {
+			font-size: 10px;
+			margin: 0;
+			padding: 0;
+		}
+		</style>
+		<h7>Phalcon</h7>
+		<table class='debug-table table table-striped table-condensed'>
+			<tr>
+				<td>Time</td>
+				<td>$time</td>
+			</tr>
+			<tr>
+				<td>Controller</td>
+				<td>{$controller}</td>
+			</tr>
+			<tr>
+				<td>Action</td>
+				<td>{$action}</td>
+			</tr>";
+
+			foreach($this->_views as $view) {
+				echo "<tr><td>View</td><td>{$view}</td></tr>";
+			}
+
+		echo "</table>";
+
+
+			//	Print out Session Data
+		if (!empty($_SESSION)) {
+			echo "<h7>Session</h7>
+			<table class='debug-table table table-striped table-condensed'><tr><th>Session Name</th><th>Session Value</th></tr>";
+			echo "<tr><td>" . session_name() . "</td><td>" . session_id() . "</td></tr>";
+			foreach($_SESSION as $index => $value) {
+				echo "<tr><td>$index</td><td>" . printValue($value) . "</td></tr>";
+			}
+			echo "</table>";
+		}
+
+		//printSuperGlobal($_SESSION, "Session");
+		printSuperGlobal($_POST, "Post");
+		printSuperGlobal($_COOKIE, "Cookie");
+
+
+		/*$queries = DatabaseFactory::getQueries();
+		if (!empty($queries)) {
+			echo "<h7>Database</h7>
+			<table class='table debug-table table-striped table-condensed'><tr><th>Query</th><th>File</th><th>Line</th><th>Success</th></tr>";
+			foreach($queries as $query) {
+				echo "<tr>
+					<td>{$query->query}</td>
+					<td>{$query->file}</td>
+					<td>{$query->line}</td>
+					<td>{$query->success}</td>
+				</tr>";	
+			}
+			echo "</table>";
+		}*/
+
+		if (class_exists('MemcachedCache', FALSE)) {
+			echo "<h7>Memcached</h7>";
+			$cache = MemcachedCache::singleton();
+			echo "<table class='table debug-table table-striped table-condensed'>";
+			foreach($cache->getServerList() as $server) {
+				echo "<tr><td>{$server['host']}</td><td>{$server['port']}</td><td></td></tr>";
+			}
+			echo "</table>";
+		}
+/*
+			//	Get All CLI Commands
+		$commands = Command::singleton()->getCommands();
+		if (!empty($commands)) {
+			echo "<h7>Shell Comamnds</h7>
+			<table class='table debug-table table-striped table-condensed'><tr><th>Command</th><th>File</th><th>Line</th><th>Success</th></tr>";
+
+			foreach($commands as $command) {
+				$command->toRow();
+			}
+			echo "</table>";
+		}*/
 	}
 }
